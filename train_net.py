@@ -321,6 +321,13 @@ def main(args):
 
 
 if __name__ == "__main__":
+    import sys
+    sys.argv = [
+        "train_net.py",
+        "--config-file", "configs/coco/panoptic-segmentation/fcclip/fcclip_convnext_large_eval_coco.yaml",
+        "--num-gpus", "1",
+        "SOLVER.IMS_PER_BATCH", "1",
+    ]
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
     launch(
