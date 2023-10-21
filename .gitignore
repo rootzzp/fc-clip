@@ -1,0 +1,3 @@
+*.pyc
+output/
+fcclip/modeling/pixel_decoder/ops/
