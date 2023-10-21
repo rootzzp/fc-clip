@@ -191,7 +191,7 @@ class FCCLIP(nn.Module):
                 bs = 128
                 for idx in range(0, len(self.train_class_names), bs):
                     text_classifier.append(self.backbone.get_text_classifier(self.train_class_names[idx:idx+bs], self.device).detach())
-                text_classifier = torch.cat(text_classifier, dim=0)
+                text_classifier = torch.cat(text_classifier, dim=0) #[3556,768]
 
                 # average across templates and normalization.
                 text_classifier /= text_classifier.norm(dim=-1, keepdim=True)
@@ -320,11 +320,16 @@ class FCCLIP(nn.Module):
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
 
-        features = self.backbone(images.tensor)
+        # stem: [1,192,256,256]
+        # res2: [1,192,256,256]
+        # res3: [1,384,128,128]
+        # res4: [1,768,64,64]
+        # res4: [1,1536,32,32]
+        features = self.backbone(images.tensor) # images.tensor: [1,3,1024,1024]
         text_classifier, num_templates = self.get_text_classifier()
         # Append void class weight
         text_classifier = torch.cat([text_classifier, F.normalize(self.void_embedding.weight, dim=-1)], dim=0)
-        features['text_classifier'] = text_classifier
+        features['text_classifier'] = text_classifier # [255,768]
         features['num_templates'] = num_templates
         outputs = self.sem_seg_head(features)
 
@@ -332,6 +337,8 @@ class FCCLIP(nn.Module):
             # mask classification target
             if "instances" in batched_inputs[0]:
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+                # gt_instances image_size [1024,1024] gt_classes [num] gt_masks [num,1024,1024] gt_boxes [num,4]
+                # images [3,1024,1024]
                 targets = self.prepare_targets(gt_instances, images)
             else:
                 targets = None

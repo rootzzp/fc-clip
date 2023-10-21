@@ -116,7 +116,7 @@ class CLIP(Backbone):
 
     def extract_features_convnext(self, x):
         out = {}
-        x = self.clip_model.visual.trunk.stem(x)
+        x = self.clip_model.visual.trunk.stem(x) # in [1,3,1024,1024] out [1,192,256,256]
         out['stem'] = x.contiguous() # os4
         for i in range(4):
             x = self.clip_model.visual.trunk.stages[i](x)
@@ -205,10 +205,10 @@ class CLIP(Backbone):
         self.eval()
         with torch.no_grad():
             # reference for templates: https://github.com/mlfoundations/open_clip/blob/91f6cce16b7bee90b3b5d38ca305b5b3b67cc200/src/training/imagenet_zeroshot_data.py
-            text_tokens = self.tokenize_text(text_list)
+            text_tokens = self.tokenize_text(text_list) # [128,77] text_list:128
             text_tokens = text_tokens.to(device)
             # we return un-normalized text feature.
-            text_features = self.encode_text(text_tokens, normalize=False)
+            text_features = self.encode_text(text_tokens, normalize=False) # [128,768]
             return text_features
 
     def forward(self, x):

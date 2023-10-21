@@ -357,8 +357,8 @@ class MSDeformAttnPixelDecoder(nn.Module):
             srcs.append(self.input_proj[idx](x))
             pos.append(self.pe_layer(x))
 
-        y, spatial_shapes, level_start_index = self.transformer(srcs, pos)
-        bs = y.shape[0]
+        y, spatial_shapes, level_start_index = self.transformer(srcs, pos) #srcs:[1,256,32,32],[1,256,64,64],[1,256,128,128]
+        bs = y.shape[0] # y [1,21504,256]
 
         split_size_or_sections = [None] * self.transformer_num_feature_levels
         for i in range(self.transformer_num_feature_levels):
