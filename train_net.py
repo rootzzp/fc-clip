@@ -51,6 +51,7 @@ from detectron2.solver.build import maybe_add_gradient_clipping
 from detectron2.utils.logger import setup_logger
 
 from fcclip import (
+    NuscenesDatasetMapper,
     COCOInstanceNewBaselineDatasetMapper,
     COCOPanopticNewBaselineDatasetMapper,
     InstanceSegEvaluator,
@@ -153,27 +154,11 @@ class Trainer(DefaultTrainer):
     @classmethod
     def build_train_loader(cls, cfg):
         # Semantic segmentation dataset mapper
-        if cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_semantic":
-            mapper = MaskFormerSemanticDatasetMapper(cfg, True)
-            return build_detection_train_loader(cfg, mapper=mapper)
-        # Panoptic segmentation dataset mapper
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_panoptic":
-            mapper = MaskFormerPanopticDatasetMapper(cfg, True)
-            return build_detection_train_loader(cfg, mapper=mapper)
-        # Instance segmentation dataset mapper
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_instance":
-            mapper = MaskFormerInstanceDatasetMapper(cfg, True)
-            return build_detection_train_loader(cfg, mapper=mapper)
-        # coco instance segmentation lsj new baseline
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "coco_instance_lsj":
-            mapper = COCOInstanceNewBaselineDatasetMapper(cfg, True)
-            return build_detection_train_loader(cfg, mapper=mapper)
-        # coco panoptic segmentation lsj new baseline
-        elif cfg.INPUT.DATASET_MAPPER_NAME == "coco_panoptic_lsj":
+        if cfg.INPUT.DATASET_MAPPER_NAME == "coco_panoptic_lsj":
             mapper = COCOPanopticNewBaselineDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
-        else:
-            mapper = None
+        elif cfg.INPUT.DATASET_MAPPER_NAME == "nuscenes":
+            mapper = NuscenesDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
 
     @classmethod
@@ -327,6 +312,7 @@ if __name__ == "__main__":
         "--config-file", "configs/coco/panoptic-segmentation/fcclip/fcclip_convnext_large_eval_coco.yaml",
         "--num-gpus", "1",
         "SOLVER.IMS_PER_BATCH", "1",
+        "INPUT.DATASET_MAPPER_NAME", "nuscenes",
     ]
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)

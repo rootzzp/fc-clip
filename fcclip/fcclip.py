@@ -331,7 +331,7 @@ class FCCLIP(nn.Module):
         text_classifier = torch.cat([text_classifier, F.normalize(self.void_embedding.weight, dim=-1)], dim=0)
         features['text_classifier'] = text_classifier # [255,768]
         features['num_templates'] = num_templates
-        outputs = self.sem_seg_head(features)
+        outputs = self.sem_seg_head(features) # pred_masks [1,250,256,256] pred_logits [1,250,134]
 
         if self.training:
             # mask classification target
@@ -339,7 +339,7 @@ class FCCLIP(nn.Module):
                 gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
                 # gt_instances image_size [1024,1024] gt_classes [num] gt_masks [num,1024,1024] gt_boxes [num,4]
                 # images [3,1024,1024]
-                targets = self.prepare_targets(gt_instances, images)
+                targets = self.prepare_targets(gt_instances, images) # mask [num,1024,1024]
             else:
                 targets = None
 

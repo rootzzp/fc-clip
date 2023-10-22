@@ -43,4 +43,5 @@ pip install -r requirements.txt
 cd fcclip/modeling/pixel_decoder/ops
 sh make.sh
 cd ../../../..
+pip install nuscenes-devkit
 ```

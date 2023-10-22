@@ -24,5 +24,5 @@ MODEL:
       OBJECT_MASK_THRESHOLD: 0.0
 
 DATASETS:
-  TRAIN: ("openvocab_coco_2017_train_panoptic_with_sem_seg",)
-  TEST: ("openvocab_ade20k_panoptic_val",)
+  TRAIN: ("nusc_mini_train",)
+  TEST: ("nusc_mini_val",)

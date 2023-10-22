@@ -28,9 +28,9 @@ def build_transform_gen(cfg, is_train):
         list[Augmentation]
     """
     assert is_train, "Only support training augmentation"
-    image_size = cfg.INPUT.IMAGE_SIZE
-    min_scale = cfg.INPUT.MIN_SCALE
-    max_scale = cfg.INPUT.MAX_SCALE
+    image_size = cfg.INPUT.IMAGE_SIZE # 1024
+    min_scale = cfg.INPUT.MIN_SCALE # 0.1
+    max_scale = cfg.INPUT.MAX_SCALE # 2
 
     augmentation = []
 
