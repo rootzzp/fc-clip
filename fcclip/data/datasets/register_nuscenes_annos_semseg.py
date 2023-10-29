@@ -168,9 +168,9 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name = "CAM_FRONT", i
         intrin = sens['camera_intrinsic']
         rot = Quaternion(sens['rotation']).rotation_matrix
         tran = sens['translation']
-        record["intrin"] = intrin
-        record["rot"] = rot
-        record["tran"] = tran
+        record["intrin"] = np.array(intrin,dtype=np.float64)
+        record["rot"] = np.array(rot,dtype=np.float64)
+        record["tran"] = np.array(tran,dtype=np.float64)
 
         egopose = nusc.get('ego_pose',
                                 nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])

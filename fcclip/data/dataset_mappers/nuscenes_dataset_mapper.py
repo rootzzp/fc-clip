@@ -191,6 +191,10 @@ class NuscenesDatasetMapper:
         instances.gt_classes = torch.tensor(classes, dtype=torch.int64)
         instances.post_tran = post_tran.unsqueeze(0)
         instances.post_rot = post_rot.unsqueeze(0)
+        instances.intrin = torch.from_numpy(dataset_dict["intrin"]).unsqueeze(0)
+        instances.rot = torch.from_numpy(dataset_dict["rot"]).unsqueeze(0)
+        instances.tran = torch.from_numpy(dataset_dict["tran"]).unsqueeze(0)
+
 
         masks = []
         for k,pts in points.items():

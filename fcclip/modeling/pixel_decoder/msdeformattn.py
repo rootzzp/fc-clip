@@ -328,6 +328,12 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.lateral_convs = lateral_convs[::-1]
         self.output_convs = output_convs[::-1]
 
+        self.frustum = self.create_frustum()
+
+        self.nx = np.array([200,    200,    1])
+        self.bx = np.array([-49.75, -49.75, 0])
+        self.dx = np.array([0.5,    0.5,    20])
+
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
         ret = {}
@@ -349,7 +355,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
         return ret
 
     @autocast(enabled=False)
-    def forward_features(self, features):
+    def forward_features(self, features, batched_inputs):
         srcs = []
         pos = []
         # Reverse feature maps into top-down order (from low to high resolution)
@@ -393,6 +399,26 @@ class MSDeformAttnPixelDecoder(nn.Module):
                 num_cur_levels += 1
         
         mask_features = self.mask_features(out[-1]) # mask_features [1,256,256,256]
+        device = mask_features.device
+
+        rots = []
+        trans = []
+        intrins = []
+        post_rots = []
+        post_trans = []
+        for input in batched_inputs:
+            rots.append(input["instances"].rot)
+            trans.append(input["instances"].tran)
+            intrins.append(input["instances"].intrin)
+            post_rots.append(input["instances"].post_rot)
+            post_trans.append(input["instances"].post_tran)
+        
+        rots = torch.cat(rots,0).unsqueeze(1).to(device)
+        trans = torch.cat(trans,0).unsqueeze(1).to(device)
+        intrins = torch.cat(intrins,0).unsqueeze(1).to(device)
+        post_rots = torch.cat(post_rots,0).unsqueeze(1).to(device)
+        post_trans = torch.cat(post_trans,0).unsqueeze(1).to(device)
+
         geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # B x N x D x H x W x 3
         bev_mask_features = self.voxel_pooling(geom, mask_features) # [bs,64,200,200]
 
@@ -401,9 +427,9 @@ class MSDeformAttnPixelDecoder(nn.Module):
 
     def create_frustum(self):
         # make grid in image plane
-        ogfH, ogfW = self.data_aug_conf['final_dim'] # 128,352
-        fH, fW = ogfH // self.downsample, ogfW // self.downsample # downsample:16; fH:8; fW:22
-        ds = torch.arange(*self.grid_conf['dbound'], dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # dbound: [4,45,1],从4开始，自增1到45
+        ogfH, ogfW = 128,352 # 128,352
+        fH, fW = ogfH // 16, ogfW // 16 # downsample:16; fH:8; fW:22
+        ds = torch.arange(4,45,1,dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # dbound: [4,45,1],从4开始，自增1到45
         D, _, _ = ds.shape # ds shape : [41,8,22]
         xs = torch.linspace(0, ogfW - 1, fW, dtype=torch.float).view(1, 1, fW).expand(D, fH, fW) # shape[41,8,22]
         ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW) # shape[41,8,22]

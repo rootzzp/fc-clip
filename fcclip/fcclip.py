@@ -331,7 +331,7 @@ class FCCLIP(nn.Module):
         text_classifier = torch.cat([text_classifier, F.normalize(self.void_embedding.weight, dim=-1)], dim=0)
         features['text_classifier'] = text_classifier # [255,768]
         features['num_templates'] = num_templates
-        outputs = self.sem_seg_head(features) # pred_masks [1,250,256,256] pred_logits [1,250,134]
+        outputs = self.sem_seg_head(features, batched_inputs) # pred_masks [1,250,256,256] pred_logits [1,250,134]
 
         if self.training:
             # mask classification target
