@@ -334,6 +334,10 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.bx = np.array([-49.75, -49.75, 0])
         self.dx = np.array([0.5,    0.5,    20])
 
+        self.D = 41
+        self.C = 64
+        self.depthnet = nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)
+
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
         ret = {}
@@ -398,7 +402,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
                 multi_scale_features.append(o)
                 num_cur_levels += 1
         
-        mask_features = self.mask_features(out[-1]) # mask_features [1,256,256,256]
+        mask_features = out[1] # mask_features [1,256,8,22]
         device = mask_features.device
 
         rots = []
@@ -420,10 +424,18 @@ class MSDeformAttnPixelDecoder(nn.Module):
         post_trans = torch.cat(post_trans,0).unsqueeze(1).to(device)
 
         geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # B x N x D x H x W x 3
-        bev_mask_features = self.voxel_pooling(geom, mask_features) # [bs,64,200,200]
+        x = self.depthnet(mask_features)
+        depth = self.get_depth_dist(x[:, :self.D]) #[bs*n,41,h,w]
+        # depth.unsqueeze(1): [bs*n,1,41,h,w]
+        # x[:, self.D:(self.D + self.C)].unsqueeze(2): [bs*n,64,1,h,w]
+        new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2) # [bs*n,64,41,h,w]
+        new_x = new_x.permute(0,2,3,4,1)
+        bev_mask_features = self.voxel_pooling(geom, new_x) # [bs,64,200,200]
 
         return bev_mask_features, out[0], multi_scale_features
 
+    def get_depth_dist(self, x, eps=1e-20):
+        return x.softmax(dim=1)
 
     def create_frustum(self):
         # make grid in image plane
@@ -431,8 +443,8 @@ class MSDeformAttnPixelDecoder(nn.Module):
         fH, fW = ogfH // 16, ogfW // 16 # downsample:16; fH:8; fW:22
         ds = torch.arange(4,45,1,dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # dbound: [4,45,1],从4开始，自增1到45
         D, _, _ = ds.shape # ds shape : [41,8,22]
-        xs = torch.linspace(0, ogfW - 1, fW, dtype=torch.float).view(1, 1, fW).expand(D, fH, fW) # shape[41,8,22]
-        ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW) # shape[41,8,22]
+        xs = torch.linspace(0, ogfW - 1, fW, dtype=torch.float64).view(1, 1, fW).expand(D, fH, fW) # shape[41,8,22]
+        ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float64).view(1, fH, 1).expand(D, fH, fW) # shape[41,8,22]
 
         # D x H x W x 3
         frustum = torch.stack((xs, ys, ds), -1) # shape [41,8,22,3] 映射回原图的视锥点云坐标，41：z方向，8：x方向，22：y方向
@@ -481,11 +493,17 @@ class MSDeformAttnPixelDecoder(nn.Module):
         geom_feats:[bs,N(5),D(41),h,w,3]
         x: [bs,N(5),41,h,w,64]
         """
+        x = x.unsqueeze(1)
         B, N, D, H, W, C = x.shape
         Nprime = B*N*D*H*W
 
         # flatten x
         x = x.reshape(Nprime, C)
+
+        device = x.device
+        self.bx = torch.from_numpy(self.bx).to(device)
+        self.dx = torch.from_numpy(self.dx).to(device)
+        self.nx = torch.from_numpy(self.nx).to(device)
 
         # flatten indices
         geom_feats = ((geom_feats - (self.bx - self.dx/2.)) / self.dx).long()

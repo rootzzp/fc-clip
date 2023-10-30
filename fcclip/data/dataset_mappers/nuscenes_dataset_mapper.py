@@ -163,8 +163,8 @@ class NuscenesDatasetMapper:
         dataset_dict["image"] = normalize_img(img)
         
         # for convenience, make augmentation matrices 3x3
-        post_tran = torch.zeros(3)
-        post_rot = torch.eye(3)
+        post_tran = torch.zeros(3,dtype=np.float64)
+        post_rot = torch.eye(3,dtype=np.float64)
         post_tran[:2] = post_tran2
         post_rot[:2, :2] = post_rot2
 
