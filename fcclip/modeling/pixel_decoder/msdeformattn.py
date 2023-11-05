@@ -334,6 +334,10 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.bx = np.array([-49.75, -49.75, 0])
         self.dx = np.array([0.5,    0.5,    20])
 
+        self.bx = torch.from_numpy(self.bx)
+        self.dx = torch.from_numpy(self.dx)
+        self.nx = torch.from_numpy(self.nx)
+
         self.D = 41
         self.C = 64
         self.depthnet = nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)
@@ -402,7 +406,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
                 multi_scale_features.append(o)
                 num_cur_levels += 1
         
-        mask_features = out[1] # mask_features [1,256,8,22]
+        mask_features = out[1] # mask_features [1,256,8,22] 1/16
         device = mask_features.device
 
         rots = []
@@ -501,9 +505,9 @@ class MSDeformAttnPixelDecoder(nn.Module):
         x = x.reshape(Nprime, C)
 
         device = x.device
-        self.bx = torch.from_numpy(self.bx).to(device)
-        self.dx = torch.from_numpy(self.dx).to(device)
-        self.nx = torch.from_numpy(self.nx).to(device)
+        self.bx = self.bx.to(device)
+        self.dx = self.dx.to(device)
+        self.nx = self.nx.to(device)
 
         # flatten indices
         geom_feats = ((geom_feats - (self.bx - self.dx/2.)) / self.dx).long()
