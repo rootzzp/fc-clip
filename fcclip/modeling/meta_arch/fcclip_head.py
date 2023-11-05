@@ -88,14 +88,13 @@ class FCCLIPHead(nn.Module):
             ),
         }
 
-    def forward(self, features, mask=None):
-        return self.layers(features, mask)
+    def forward(self, features, batched_inputs,mask=None):
+        return self.layers(features, batched_inputs, mask)
 
-    def layers(self, features, mask=None):
-        mask_features, transformer_encoder_features, multi_scale_features = self.pixel_decoder.forward_features(features) #mask_features [1,256,256,256] multi_scale_features [1,256,32,32],[1,256,64,64],[1,256,128,128]
-        if self.transformer_in_feature == "multi_scale_pixel_decoder":
-            predictions = self.predictor(multi_scale_features, mask_features, mask,
-                                        text_classifier=features["text_classifier"], num_templates=features["num_templates"])
-        else:
-            raise NotImplementedError
+    def layers(self, features, batched_inputs, mask=None):
+        mask_features, multi_scale_features = self.pixel_decoder.forward_features(features, batched_inputs) #mask_features [1,256,256,256] multi_scale_features [1,256,32,32],[1,256,64,64],[1,256,128,128]
+
+        predictions = self.predictor(multi_scale_features, mask_features, mask,
+                                    text_classifier=features["text_classifier"], num_templates=features["num_templates"])
+        
         return predictions

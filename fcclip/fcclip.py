@@ -318,20 +318,20 @@ class FCCLIP(nn.Module):
         """
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
-        images = ImageList.from_tensors(images, self.size_divisibility)
+        images = ImageList.from_tensors(images, self.size_divisibility) # [bs,3,1024,1024]
 
         # stem: [1,192,256,256]
-        # res2: [1,192,256,256]
-        # res3: [1,384,128,128]
-        # res4: [1,768,64,64]
-        # res4: [1,1536,32,32]
+        # res2: [1,192,256,256] 1/4
+        # res3: [1,384,128,128] 1/8
+        # res4: [1,768,64,64] 1/16
+        # res4: [1,1536,32,32] 1/32
         features = self.backbone(images.tensor) # images.tensor: [1,3,1024,1024]
         text_classifier, num_templates = self.get_text_classifier()
         # Append void class weight
         text_classifier = torch.cat([text_classifier, F.normalize(self.void_embedding.weight, dim=-1)], dim=0)
         features['text_classifier'] = text_classifier # [255,768]
         features['num_templates'] = num_templates
-        outputs = self.sem_seg_head(features) # pred_masks [1,250,256,256] pred_logits [1,250,134]
+        outputs = self.sem_seg_head(features, batched_inputs) # pred_masks [1,250,256,256] pred_logits [1,250,134]
 
         if self.training:
             # mask classification target
@@ -457,12 +457,11 @@ class FCCLIP(nn.Module):
         for targets_per_image in targets:
             # pad gt
             gt_masks = targets_per_image.gt_masks
-            padded_masks = torch.zeros((gt_masks.shape[0], h_pad, w_pad), dtype=gt_masks.dtype, device=gt_masks.device)
-            padded_masks[:, : gt_masks.shape[1], : gt_masks.shape[2]] = gt_masks
+            padded_masks = gt_masks
             new_targets.append(
                 {
-                    "labels": targets_per_image.gt_classes,
-                    "masks": padded_masks,
+                    "labels": targets_per_image.gt_classes.squeeze(0),
+                    "masks": padded_masks.squeeze(0),
                 }
             )
         return new_targets

@@ -23,6 +23,7 @@ from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 from ..transformer_decoder.position_encoding import PositionEmbeddingSine
 from .ops.modules import MSDeformAttn
 import copy
+from fcclip.utils.misc import QuickCumsum
 
 
 def _get_clones(module, N):
@@ -327,6 +328,22 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.lateral_convs = lateral_convs[::-1]
         self.output_convs = output_convs[::-1]
 
+        self.final_dim = [512,512]
+        self.downsample = 4
+        self.frustum = self.create_frustum()
+
+        self.nx = np.array([200,    200,    1])
+        self.bx = np.array([-49.75, -49.75, 0])
+        self.dx = np.array([0.5,    0.5,    20])
+
+        self.bx = torch.from_numpy(self.bx)
+        self.dx = torch.from_numpy(self.dx)
+        self.nx = torch.from_numpy(self.nx)
+
+        self.D = 41
+        self.C = 64
+        self.depthnet = nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)
+
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
         ret = {}
@@ -348,7 +365,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
         return ret
 
     @autocast(enabled=False)
-    def forward_features(self, features):
+    def forward_features(self, features, batched_inputs):
         srcs = []
         pos = []
         # Reverse feature maps into top-down order (from low to high resolution)
@@ -390,5 +407,148 @@ class MSDeformAttnPixelDecoder(nn.Module):
             if num_cur_levels < self.maskformer_num_feature_levels:
                 multi_scale_features.append(o)
                 num_cur_levels += 1
+        
+        mask_features = out[-1] # mask_features [1,256,128,128] 1/4
+        device = mask_features.device
 
-        return self.mask_features(out[-1]), out[0], multi_scale_features
+        rots = []
+        trans = []
+        intrins = []
+        post_rots = []
+        post_trans = []
+        for input in batched_inputs:
+            rots.append(input["instances"].rot)
+            trans.append(input["instances"].tran)
+            intrins.append(input["instances"].intrin)
+            post_rots.append(input["instances"].post_rot)
+            post_trans.append(input["instances"].post_tran)
+        
+        rots = torch.cat(rots,0).unsqueeze(1).to(device)
+        trans = torch.cat(trans,0).unsqueeze(1).to(device)
+        intrins = torch.cat(intrins,0).unsqueeze(1).to(device)
+        post_rots = torch.cat(post_rots,0).unsqueeze(1).to(device)
+        post_trans = torch.cat(post_trans,0).unsqueeze(1).to(device)
+
+        geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # B x N x D x H x W x 3
+        x = self.depthnet(mask_features)
+        depth = self.get_depth_dist(x[:, :self.D]) #[bs*n,41,h,w]
+        # depth.unsqueeze(1): [bs*n,1,41,h,w]
+        # x[:, self.D:(self.D + self.C)].unsqueeze(2): [bs*n,64,1,h,w]
+        new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2) # [bs*n,64,41,h,w]
+        new_x = new_x.permute(0,2,3,4,1)
+        bev_mask_features = self.voxel_pooling(geom, new_x) # [bs,64,200,200]
+
+        return bev_mask_features, multi_scale_features
+
+    def get_depth_dist(self, x, eps=1e-20):
+        return x.softmax(dim=1)
+
+    def create_frustum(self):
+        # make grid in image plane
+        ogfH, ogfW = self.final_dim[0],self.final_dim[1] # 512,512
+        fH, fW = ogfH // self.downsample, ogfW // self.downsample # downsample:4; fH:128; fW:128
+        ds = torch.arange(4,45,1,dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # dbound: [4,45,1],从4开始，自增1到45
+        D, _, _ = ds.shape # ds shape : [41,8,22]
+        xs = torch.linspace(0, ogfW - 1, fW, dtype=torch.float64).view(1, 1, fW).expand(D, fH, fW) # shape[41,8,22]
+        ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float64).view(1, fH, 1).expand(D, fH, fW) # shape[41,8,22]
+
+        # D x H x W x 3
+        frustum = torch.stack((xs, ys, ds), -1) # shape [41,8,22,3] 映射回原图的视锥点云坐标，41：z方向，8：x方向，22：y方向
+        return nn.Parameter(frustum, requires_grad=False)
+
+    def get_geometry(self, rots, trans, intrins, post_rots, post_trans):
+        """Determine the (x,y,z) locations (in the ego frame)
+        of the points in the point cloud.
+        Returns B x N x D x H/downsample x W/downsample x 3
+        """
+        B, N, _ = trans.shape # N : 5
+
+        # undo post-transformation
+        # B x N x D x H x W x 3
+        points = self.frustum - post_trans.view(B, N, 1, 1, 1, 3) # frustum [41,8,22,3]; post_trans [bs,5,3]
+        points = torch.inverse(post_rots).view(B, N, 1, 1, 1, 3, 3).matmul(points.unsqueeze(-1)) #B x N x D x H x W x 3 x 1
+
+        # cam_to_ego
+        """
+        Z*P_uv=KP_c,K为内参矩阵, Z为相机坐标系下点的z坐标
+        P_e = rots @ P_c + trans
+        """
+        points = torch.cat((points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3],
+                            points[:, :, :, :, :, 2:3]
+                            ), 5) #Z*P_uv shape:[B,N,D,H,W,3,1]
+        combine = rots.matmul(torch.inverse(intrins))
+        points = combine.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1) # rots @ K逆 @ (Z*P_uv)
+        points += trans.view(B, N, 1, 1, 1, 3) #B x N x D x H x W x 3
+
+        return points
+
+    def get_cam_feats(self, x):
+        """Return B x N x D x H/downsample x W/downsample x C
+        """
+        B, N, C, imH, imW = x.shape
+
+        x = x.view(B*N, C, imH, imW)
+        x = self.camencode(x)
+        x = x.view(B, N, self.camC, self.D, imH//self.downsample, imW//self.downsample)
+        x = x.permute(0, 1, 3, 4, 5, 2)
+
+        return x
+
+    def voxel_pooling(self, geom_feats, x):
+        """_summary_
+        geom_feats:[bs,N(5),D(41),h,w,3]
+        x: [bs,N(5),41,h,w,64]
+        """
+        x = x.unsqueeze(1)
+        B, N, D, H, W, C = x.shape
+        Nprime = B*N*D*H*W
+
+        # flatten x
+        x = x.reshape(Nprime, C)
+
+        device = x.device
+        self.bx = self.bx.to(device)
+        self.dx = self.dx.to(device)
+        self.nx = self.nx.to(device)
+
+        # flatten indices
+        geom_feats = ((geom_feats - (self.bx - self.dx/2.)) / self.dx).long()
+        geom_feats = geom_feats.view(Nprime, 3)
+        batch_ix = torch.cat([torch.full([Nprime//B, 1], ix,
+                             device=x.device, dtype=torch.long) for ix in range(B)])# [Nprime//bs,bs] bs = 1时:[Nprime,1],value = 0
+        geom_feats = torch.cat((geom_feats, batch_ix), 1) # [Nprime,3+bs]
+
+        # filter out points that are outside box
+        kept = (geom_feats[:, 0] >= 0) & (geom_feats[:, 0] < self.nx[0])\
+            & (geom_feats[:, 1] >= 0) & (geom_feats[:, 1] < self.nx[1])\
+            & (geom_feats[:, 2] >= 0) & (geom_feats[:, 2] < self.nx[2])
+        x = x[kept]
+        geom_feats = geom_feats[kept]
+
+        # get tensors from the same voxel next to each other
+        ranks = geom_feats[:, 0] * (self.nx[1] * self.nx[2] * B)\
+            + geom_feats[:, 1] * (self.nx[2] * B)\
+            + geom_feats[:, 2] * B\
+            + geom_feats[:, 3]
+        sorts = ranks.argsort()
+        x, geom_feats, ranks = x[sorts], geom_feats[sorts], ranks[sorts]
+
+        # cumsum trick
+        x, geom_feats = QuickCumsum.apply(x, geom_feats, ranks)# x:在不同voxel里面的特征值（累加后的）,geom_feats:这些不同voxel的坐标
+
+        # griddify (B x C x Z x X x Y)
+        final = torch.zeros((B, C, self.nx[2], self.nx[0], self.nx[1]), device=x.device)#[1,64,1,200,200]
+        final[geom_feats[:, 3], :, geom_feats[:, 2], geom_feats[:, 0], geom_feats[:, 1]] = x #geom_feats[:, 3]:batch_index geom_feats[:, 2]:z  geom_feats[:, 0]:x geom_feats[:, 1]:y
+
+        # collapse Z
+        final = torch.cat(final.unbind(dim=2), 1)
+
+        return final
+
+    def get_voxels(self, x, rots, trans, intrins, post_rots, post_trans):
+        geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # B x N x D x H x W x 3
+        x = self.get_cam_feats(x) # x [bs,N(5),41,h,w,64]
+
+        x = self.voxel_pooling(geom, x) # [bs,64,200,200]
+
+        return x

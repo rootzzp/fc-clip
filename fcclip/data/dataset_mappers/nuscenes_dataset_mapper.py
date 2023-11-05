@@ -112,7 +112,7 @@ class NuscenesDatasetMapper:
         self.img_format = image_format
         self.is_train = is_train
         self.data_aug_conf = {}
-        self.data_aug_conf["final_dim"] = [128,352]
+        self.data_aug_conf["final_dim"] = [512,512]
         self.data_aug_conf['resize_lim'] = (0.193, 0.225)
         self.data_aug_conf["bot_pct_lim"]=(0.0, 0.22)
         self.data_aug_conf["rot_lim"]=(-5.4, 5.4)
@@ -163,8 +163,8 @@ class NuscenesDatasetMapper:
         dataset_dict["image"] = normalize_img(img)
         
         # for convenience, make augmentation matrices 3x3
-        post_tran = torch.zeros(3)
-        post_rot = torch.eye(3)
+        post_tran = torch.zeros(3,dtype=torch.float64)
+        post_rot = torch.eye(3,dtype=torch.float64)
         post_tran[:2] = post_tran2
         post_rot[:2, :2] = post_rot2
 
@@ -175,22 +175,28 @@ class NuscenesDatasetMapper:
             return dataset_dict
 
         instances = Instances(image_shape)
-        classes = []
+        
         masks = []
         points = {}
         for segment_info in dataset_dict["annotations"]:
             class_id = segment_info["category_id"]
-            classes.append(class_id)
             category_name = segment_info["category_name"]
             pts = segment_info["pts"]
-            if category_name not in points:
-                points[category_name] = []
-            points[category_name].append(pts)
+            if class_id not in points:
+                points[class_id] = []
+            points[class_id].append(pts)
 
+        classes = []
+        for k,pts in points.items():
+            classes.append(k)
         classes = np.array([classes])
         instances.gt_classes = torch.tensor(classes, dtype=torch.int64)
         instances.post_tran = post_tran.unsqueeze(0)
         instances.post_rot = post_rot.unsqueeze(0)
+        instances.intrin = torch.from_numpy(dataset_dict["intrin"]).unsqueeze(0)
+        instances.rot = torch.from_numpy(dataset_dict["rot"]).unsqueeze(0)
+        instances.tran = torch.from_numpy(dataset_dict["tran"]).unsqueeze(0)
+
 
         masks = []
         for k,pts in points.items():

@@ -26,74 +26,30 @@ from detectron2.structures import BoxMode
 from nuscenes.utils.geometry_utils import  BoxVisibility
 from nuscenes.utils.splits import create_splits_scenes
 
-categories = ['human.pedestrian.adult',
-             'human.pedestrian.child',
-             'human.pedestrian.wheelchair',
-             'human.pedestrian.stroller',
-             'human.pedestrian.personal_mobility',
-             'human.pedestrian.police_officer',
-             'human.pedestrian.construction_worker',
+categories = [
+             'adult',
+             'child',
+             'wheelchair',
+             'stroller',
+             'personal_mobility',
+             'police_officer',
+             'construction_worker',
              'animal',
-             'vehicle.car',
-             'vehicle.motorcycle',
-             'vehicle.bicycle',
-             'vehicle.bus.bendy',
-             'vehicle.bus.rigid',
-             'vehicle.truck',
-             'vehicle.construction',
-             'vehicle.emergency.ambulance',
-             'vehicle.emergency.police',
-             'vehicle.trailer',
-             'movable_object.barrier',
-             'movable_object.trafficcone',
-             'movable_object.pushable_pullable',
-             'movable_object.debris',
-             'static_object.bicycle_rack']
-
-# def get_image_data(self, rec, cam):
-#         imgs = []
-#         rots = []
-#         trans = []
-#         intrins = []
-#         post_rots = []
-#         post_trans = []
-        
-#         samp = self.nusc.get('sample_data', rec['data'][cam])
-#         imgname = os.path.join(self.nusc.dataroot, samp['filename'])
-#         img = Image.open(imgname)
-#         post_rot = torch.eye(2)
-#         post_tran = torch.zeros(2)
-
-#         sens = self.nusc.get('calibrated_sensor', samp['calibrated_sensor_token'])
-#         intrin = torch.Tensor(sens['camera_intrinsic'])
-#         rot = torch.Tensor(Quaternion(sens['rotation']).rotation_matrix)
-#         tran = torch.Tensor(sens['translation'])
-
-#         # augmentation (resize, crop, horizontal flip, rotate)
-#         resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
-#         img, post_rot2, post_tran2 = img_transform(img, post_rot, post_tran,
-#                                                     resize=resize,
-#                                                     resize_dims=resize_dims,
-#                                                     crop=crop,
-#                                                     flip=flip,
-#                                                     rotate=rotate,
-#                                                     )
-        
-#         # for convenience, make augmentation matrices 3x3
-#         post_tran = torch.zeros(3)
-#         post_rot = torch.eye(3)
-#         post_tran[:2] = post_tran2
-#         post_rot[:2, :2] = post_rot2
-
-#         imgs.append(normalize_img(img))
-#         intrins.append(intrin)
-#         rots.append(rot)
-#         trans.append(tran)
-#         post_rots.append(post_rot)
-#         post_trans.append(post_tran)
-
-#     return (torch.stack(imgs), torch.stack(rots), torch.stack(trans),
-#             torch.stack(intrins), torch.stack(post_rots), torch.stack(post_trans))
+             'car',
+             'motorcycle',
+             'bicycle',
+             'bendy',
+             'rigid',
+             'truck',
+             'construction',
+             'ambulance',
+             'police',
+             'trailer',
+             'barrier',
+             'trafficcone',
+             'pushable_pullable',
+             'debris',
+             'bicycle_rack']
 
 def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name = "CAM_FRONT", is_train = True, categories=None):
     """
@@ -168,9 +124,9 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name = "CAM_FRONT", i
         intrin = sens['camera_intrinsic']
         rot = Quaternion(sens['rotation']).rotation_matrix
         tran = sens['translation']
-        record["intrin"] = intrin
-        record["rot"] = rot
-        record["tran"] = tran
+        record["intrin"] = np.array(intrin,dtype=np.float64)
+        record["rot"] = np.array(rot,dtype=np.float64)
+        record["tran"] = np.array(tran,dtype=np.float64)
 
         egopose = nusc.get('ego_pose',
                                 nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
@@ -186,6 +142,8 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name = "CAM_FRONT", i
 
             pts = box.bottom_corners()[:2].T
             c = inst['category_name']
+            if '.' in c:
+                c = c.split('.')[-1]
             obj = {
                 "pts": pts,
                 "category_name": c,
