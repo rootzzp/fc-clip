@@ -328,7 +328,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.lateral_convs = lateral_convs[::-1]
         self.output_convs = output_convs[::-1]
 
-        self.final_dim = [512,512]
+        self.final_dim = [256,256]
         self.downsample = 4
         self.frustum = self.create_frustum()
 
@@ -343,6 +343,12 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.D = 41
         self.C = 64
         self.depthnet = nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)
+
+        self.depthnets = nn.ModuleList([
+            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0),
+            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0),
+            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0),
+        ])
 
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
@@ -387,7 +393,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
 
         out = []
         multi_scale_features = []
-        num_cur_levels = 0
+
         for i, z in enumerate(y):
             out.append(z.transpose(1, 2).view(bs, -1, spatial_shapes[i][0], spatial_shapes[i][1]))
 
@@ -402,11 +408,6 @@ class MSDeformAttnPixelDecoder(nn.Module):
             y = cur_fpn + F.interpolate(out[-1], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False)
             y = output_conv(y)
             out.append(y)
-
-        for o in out:
-            if num_cur_levels < self.maskformer_num_feature_levels:
-                multi_scale_features.append(o)
-                num_cur_levels += 1
         
         mask_features = out[-1] # mask_features [1,256,128,128] 1/4
         device = mask_features.device
@@ -437,6 +438,18 @@ class MSDeformAttnPixelDecoder(nn.Module):
         new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2) # [bs*n,64,41,h,w]
         new_x = new_x.permute(0,2,3,4,1)
         bev_mask_features = self.voxel_pooling(geom, new_x) # [bs,64,200,200]
+
+        num_cur_levels = 0
+        for o in out:
+            if num_cur_levels < self.maskformer_num_feature_levels:
+                up_o = F.interpolate(out[-1], size=mask_features.shape[-2:], mode="bilinear", align_corners=False)
+                x = self.depthnets[num_cur_levels](up_o)
+                depth = self.get_depth_dist(x[:, :self.D]) #[bs*n,41,h,w]
+                new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2) # [bs*n,64,41,h,w]
+                new_x = new_x.permute(0,2,3,4,1)
+                o_out = self.voxel_pooling(geom, new_x) # [bs,64,200,200]
+                multi_scale_features.append(o_out)
+                num_cur_levels += 1
 
         return bev_mask_features, multi_scale_features
 

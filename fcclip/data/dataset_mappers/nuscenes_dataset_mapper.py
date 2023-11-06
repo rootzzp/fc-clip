@@ -112,7 +112,7 @@ class NuscenesDatasetMapper:
         self.img_format = image_format
         self.is_train = is_train
         self.data_aug_conf = {}
-        self.data_aug_conf["final_dim"] = [512,512]
+        self.data_aug_conf["final_dim"] = [256,256]
         self.data_aug_conf['resize_lim'] = (0.193, 0.225)
         self.data_aug_conf["bot_pct_lim"]=(0.0, 0.22)
         self.data_aug_conf["rot_lim"]=(-5.4, 5.4)

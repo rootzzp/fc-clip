@@ -311,6 +311,7 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
         super().__init__()
 
         assert mask_classification, "Only support mask classification model"
+        in_channels = 64
         self.mask_classification = mask_classification
         hidden_dim = 64
         mask_dim = 64
