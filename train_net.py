@@ -69,6 +69,11 @@ class Trainer(DefaultTrainer):
     Extension of the Trainer class adapted to FCCLIP.
     """
 
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        a = self._hooks
+        del self._hooks[3]
+
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
         """
