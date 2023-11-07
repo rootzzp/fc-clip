@@ -329,8 +329,8 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.output_convs = output_convs[::-1]
 
         self.final_dim = [256,256]
-        self.downsample = 4
-        self.frustum = self.create_frustum()
+        self.downsample = [4,8,16,32]
+        self.frustums = self.create_frustum()
 
         self.nx = np.array([200,    200,    1])
         self.bx = np.array([-49.75, -49.75, 0])
@@ -430,6 +430,9 @@ class MSDeformAttnPixelDecoder(nn.Module):
         post_rots = torch.cat(post_rots,0).unsqueeze(1).to(device)
         post_trans = torch.cat(post_trans,0).unsqueeze(1).to(device)
 
+        for k in range(len(self.frustums)):
+            self.frustums[k] = self.frustums[k].to(device)
+
         geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # B x N x D x H x W x 3
         x = self.depthnet(mask_features)
         depth = self.get_depth_dist(x[:, :self.D]) #[bs*n,41,h,w]
@@ -442,8 +445,8 @@ class MSDeformAttnPixelDecoder(nn.Module):
         num_cur_levels = 0
         for o in out:
             if num_cur_levels < self.maskformer_num_feature_levels:
-                up_o = F.interpolate(out[-1], size=mask_features.shape[-2:], mode="bilinear", align_corners=False)
-                x = self.depthnets[num_cur_levels](up_o)
+                geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans,self.maskformer_num_feature_levels - num_cur_levels) # B x N x D x H x W x 3
+                x = self.depthnets[num_cur_levels](o)
                 depth = self.get_depth_dist(x[:, :self.D]) #[bs*n,41,h,w]
                 new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2) # [bs*n,64,41,h,w]
                 new_x = new_x.permute(0,2,3,4,1)
@@ -459,17 +462,20 @@ class MSDeformAttnPixelDecoder(nn.Module):
     def create_frustum(self):
         # make grid in image plane
         ogfH, ogfW = self.final_dim[0],self.final_dim[1] # 512,512
-        fH, fW = ogfH // self.downsample, ogfW // self.downsample # downsample:4; fH:128; fW:128
-        ds = torch.arange(4,45,1,dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # dbound: [4,45,1],从4开始，自增1到45
-        D, _, _ = ds.shape # ds shape : [41,8,22]
-        xs = torch.linspace(0, ogfW - 1, fW, dtype=torch.float64).view(1, 1, fW).expand(D, fH, fW) # shape[41,8,22]
-        ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float64).view(1, fH, 1).expand(D, fH, fW) # shape[41,8,22]
+        frustums = []
+        for downsample in self.downsample:
+            fH, fW = ogfH // downsample, ogfW // downsample # downsample:4; fH:128; fW:128
+            ds = torch.arange(4,45,1,dtype=torch.float).view(-1, 1, 1).expand(-1, fH, fW) # dbound: [4,45,1],从4开始，自增1到45
+            D, _, _ = ds.shape # ds shape : [41,8,22]
+            xs = torch.linspace(0, ogfW - 1, fW, dtype=torch.float64).view(1, 1, fW).expand(D, fH, fW) # shape[41,8,22]
+            ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float64).view(1, fH, 1).expand(D, fH, fW) # shape[41,8,22]
 
-        # D x H x W x 3
-        frustum = torch.stack((xs, ys, ds), -1) # shape [41,8,22,3] 映射回原图的视锥点云坐标，41：z方向，8：x方向，22：y方向
-        return nn.Parameter(frustum, requires_grad=False)
+            # D x H x W x 3
+            frustum = torch.stack((xs, ys, ds), -1) # shape [41,8,22,3] 映射回原图的视锥点云坐标，41：z方向，8：x方向，22：y方向
+            frustums.append(nn.Parameter(frustum, requires_grad=False))
+        return frustums
 
-    def get_geometry(self, rots, trans, intrins, post_rots, post_trans):
+    def get_geometry(self, rots, trans, intrins, post_rots, post_trans,index=0):
         """Determine the (x,y,z) locations (in the ego frame)
         of the points in the point cloud.
         Returns B x N x D x H/downsample x W/downsample x 3
@@ -478,7 +484,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
 
         # undo post-transformation
         # B x N x D x H x W x 3
-        points = self.frustum - post_trans.view(B, N, 1, 1, 1, 3) # frustum [41,8,22,3]; post_trans [bs,5,3]
+        points = self.frustums[index] - post_trans.view(B, N, 1, 1, 1, 3) # frustum [41,8,22,3]; post_trans [bs,5,3]
         points = torch.inverse(post_rots).view(B, N, 1, 1, 1, 3, 3).matmul(points.unsqueeze(-1)) #B x N x D x H x W x 3 x 1
 
         # cam_to_ego
@@ -557,11 +563,3 @@ class MSDeformAttnPixelDecoder(nn.Module):
         final = torch.cat(final.unbind(dim=2), 1)
 
         return final
-
-    def get_voxels(self, x, rots, trans, intrins, post_rots, post_trans):
-        geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # B x N x D x H x W x 3
-        x = self.get_cam_feats(x) # x [bs,N(5),41,h,w,64]
-
-        x = self.voxel_pooling(geom, x) # [bs,64,200,200]
-
-        return x
