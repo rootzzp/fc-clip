@@ -325,13 +325,18 @@ class FCCLIP(nn.Module):
         # res3: [1,384,128,128] 1/8
         # res4: [1,768,64,64] 1/16
         # res4: [1,1536,32,32] 1/32
-        features = self.backbone(images.tensor) # images.tensor: [1,3,1024,1024]
-        text_classifier, num_templates = self.get_text_classifier()
-        # Append void class weight
-        text_classifier = torch.cat([text_classifier, F.normalize(self.void_embedding.weight, dim=-1)], dim=0)
-        features['text_classifier'] = text_classifier # [255,768]
-        features['num_templates'] = num_templates
-        outputs = self.sem_seg_head(features, batched_inputs) # pred_masks [1,250,256,256] pred_logits [1,250,134]
+        features_list = []
+        image_list = torch.chunk(images.tensor,5,dim=1)
+        for t in image_list:
+            features = self.backbone(t.squeeze(1))
+            features_list.append(features)
+            # features = self.backbone(images.tensor) # images.tensor: [1,3,1024,1024]
+            text_classifier, num_templates = self.get_text_classifier()
+            # Append void class weight
+            text_classifier = torch.cat([text_classifier, F.normalize(self.void_embedding.weight, dim=-1)], dim=0)
+            features['text_classifier'] = text_classifier # [255,768]
+            features['num_templates'] = num_templates
+        outputs = self.sem_seg_head(features_list, batched_inputs) # pred_masks [1,250,256,256] pred_logits [1,250,134]
 
         if self.training:
             # mask classification target

@@ -371,43 +371,49 @@ class MSDeformAttnPixelDecoder(nn.Module):
         return ret
 
     @autocast(enabled=False)
-    def forward_features(self, features, batched_inputs):
-        srcs = []
-        pos = []
-        # Reverse feature maps into top-down order (from low to high resolution)
-        for idx, f in enumerate(self.transformer_in_features[::-1]):
-            x = features[f].float()  # deformable detr does not support half precision
-            srcs.append(self.input_proj[idx](x))
-            pos.append(self.pe_layer(x))
-
-        y, spatial_shapes, level_start_index = self.transformer(srcs, pos) #srcs:[1,256,32,32],[1,256,64,64],[1,256,128,128]
-        bs = y.shape[0] # y [1,21504,256]
-
-        split_size_or_sections = [None] * self.transformer_num_feature_levels
-        for i in range(self.transformer_num_feature_levels):
-            if i < self.transformer_num_feature_levels - 1:
-                split_size_or_sections[i] = level_start_index[i + 1] - level_start_index[i]
-            else:
-                split_size_or_sections[i] = y.shape[1] - level_start_index[i]
-        y = torch.split(y, split_size_or_sections, dim=1)
-
-        out = []
+    def forward_features(self, features_list, batched_inputs):
         multi_scale_features = []
+        multi_view_features = [[] for i in range(4)]
+        for features in features_list:
+            srcs = []
+            pos = []
+            # Reverse feature maps into top-down order (from low to high resolution)
+            for idx, f in enumerate(self.transformer_in_features[::-1]):
+                x = features[f].float()  # deformable detr does not support half precision
+                srcs.append(self.input_proj[idx](x))
+                pos.append(self.pe_layer(x))
 
-        for i, z in enumerate(y):
-            out.append(z.transpose(1, 2).view(bs, -1, spatial_shapes[i][0], spatial_shapes[i][1]))
+            y, spatial_shapes, level_start_index = self.transformer(srcs, pos) #srcs:[1,256,32,32],[1,256,64,64],[1,256,128,128]
+            bs = y.shape[0] # y [1,21504,256]
 
-        # append `out` with extra FPN levels
-        # Reverse feature maps into top-down order (from low to high resolution)
-        for idx, f in enumerate(self.in_features[:self.num_fpn_levels][::-1]):
-            x = features[f].float()
-            lateral_conv = self.lateral_convs[idx]
-            output_conv = self.output_convs[idx]
-            cur_fpn = lateral_conv(x)
-            # Following FPN implementation, we use nearest upsampling here
-            y = cur_fpn + F.interpolate(out[-1], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False)
-            y = output_conv(y)
-            out.append(y)
+            split_size_or_sections = [None] * self.transformer_num_feature_levels
+            for i in range(self.transformer_num_feature_levels):
+                if i < self.transformer_num_feature_levels - 1:
+                    split_size_or_sections[i] = level_start_index[i + 1] - level_start_index[i]
+                else:
+                    split_size_or_sections[i] = y.shape[1] - level_start_index[i]
+            y = torch.split(y, split_size_or_sections, dim=1)
+
+            out = []
+
+            for i, z in enumerate(y):
+                out.append(z.transpose(1, 2).view(bs, -1, spatial_shapes[i][0], spatial_shapes[i][1]))
+
+            # append `out` with extra FPN levels
+            # Reverse feature maps into top-down order (from low to high resolution)
+            for idx, f in enumerate(self.in_features[:self.num_fpn_levels][::-1]):
+                x = features[f].float()
+                lateral_conv = self.lateral_convs[idx]
+                output_conv = self.output_convs[idx]
+                cur_fpn = lateral_conv(x)
+                # Following FPN implementation, we use nearest upsampling here
+                y = cur_fpn + F.interpolate(out[-1], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False)
+                y = output_conv(y)
+                out.append(y)
+
+            for i,o in enumerate(out):
+                multi_view_features[i].append(o.unsqueeze(1))
+        out = [torch.cat(x,dim=1) for x in multi_view_features]
         
         mask_features = out[-1] # mask_features [1,256,128,128] 1/4
         device = mask_features.device
@@ -424,32 +430,38 @@ class MSDeformAttnPixelDecoder(nn.Module):
             post_rots.append(input["instances"].post_rot)
             post_trans.append(input["instances"].post_tran)
         
-        rots = torch.cat(rots,0).unsqueeze(1).to(device)
-        trans = torch.cat(trans,0).unsqueeze(1).to(device)
-        intrins = torch.cat(intrins,0).unsqueeze(1).to(device)
-        post_rots = torch.cat(post_rots,0).unsqueeze(1).to(device)
-        post_trans = torch.cat(post_trans,0).unsqueeze(1).to(device)
+        rots = torch.cat(rots,0).to(device)
+        trans = torch.cat(trans,0).to(device)
+        intrins = torch.cat(intrins,0).to(device)
+        post_rots = torch.cat(post_rots,0).to(device)
+        post_trans = torch.cat(post_trans,0).to(device)
 
         for k in range(len(self.frustums)):
             self.frustums[k] = self.frustums[k].to(device)
 
         geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # B x N x D x H x W x 3
+        B, N, C, imH, imW = mask_features.shape
+        mask_features = mask_features.view(B*N, C, imH, imW)
         x = self.depthnet(mask_features)
         depth = self.get_depth_dist(x[:, :self.D]) #[bs*n,41,h,w]
         # depth.unsqueeze(1): [bs*n,1,41,h,w]
         # x[:, self.D:(self.D + self.C)].unsqueeze(2): [bs*n,64,1,h,w]
         new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2) # [bs*n,64,41,h,w]
-        new_x = new_x.permute(0,2,3,4,1)
+        new_x = new_x.view(B, N, self.C, self.D, imH, imW)
+        new_x = new_x.permute(0, 1, 3, 4, 5, 2)
         bev_mask_features = self.voxel_pooling(geom, new_x) # [bs,64,200,200]
 
         num_cur_levels = 0
         for o in out:
             if num_cur_levels < self.maskformer_num_feature_levels:
                 geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans,self.maskformer_num_feature_levels - num_cur_levels) # B x N x D x H x W x 3
+                B, N, C, imH, imW = o.shape
+                o = o.view(B*N, C, imH, imW)
                 x = self.depthnets[num_cur_levels](o)
                 depth = self.get_depth_dist(x[:, :self.D]) #[bs*n,41,h,w]
                 new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2) # [bs*n,64,41,h,w]
-                new_x = new_x.permute(0,2,3,4,1)
+                new_x = new_x.view(B, N, self.C, self.D, imH, imW)
+                new_x = new_x.permute(0, 1, 3, 4, 5, 2)
                 o_out = self.voxel_pooling(geom, new_x) # [bs,64,200,200]
                 multi_scale_features.append(o_out)
                 num_cur_levels += 1
@@ -518,7 +530,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
         geom_feats:[bs,N(5),D(41),h,w,3]
         x: [bs,N(5),41,h,w,64]
         """
-        x = x.unsqueeze(1)
+
         B, N, D, H, W, C = x.shape
         Nprime = B*N*D*H*W
 

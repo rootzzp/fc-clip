@@ -95,6 +95,6 @@ class FCCLIPHead(nn.Module):
         mask_features, multi_scale_features = self.pixel_decoder.forward_features(features, batched_inputs) #mask_features [1,256,256,256] multi_scale_features [1,256,32,32],[1,256,64,64],[1,256,128,128]
 
         predictions = self.predictor(multi_scale_features, mask_features, mask,
-                                    text_classifier=features["text_classifier"], num_templates=features["num_templates"])
+                                    text_classifier=features[0]["text_classifier"], num_templates=features[0]["num_templates"])
         
         return predictions

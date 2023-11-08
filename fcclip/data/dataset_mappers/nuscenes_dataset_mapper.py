@@ -143,30 +143,47 @@ class NuscenesDatasetMapper:
             dict: a format that builtin models in detectron2 accept
         """
         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
+        post_trans = []
+        post_rots = []
+        intrins = []
+        rots = []
+        trans = []
+        imgs = []
+        for cam,data in dataset_dict["camera_infos"].items():
+            img = Image.open(data["file_name"])
+            post_rot = torch.eye(2)
+            post_tran = torch.zeros(2)
 
-        img = Image.open(dataset_dict["file_name"])
-        post_rot = torch.eye(2)
-        post_tran = torch.zeros(2)
+            # augmentation (resize, crop, horizontal flip, rotate)
+            resize, resize_dims, crop, flip, rotate = self.sample_augmentation(img)
+            img, post_rot2, post_tran2 = self.img_transform(img, post_rot, post_tran,
+                                                    resize=resize,
+                                                    resize_dims=resize_dims,
+                                                    crop=crop,
+                                                    flip=flip,
+                                                    rotate=rotate,
+                                                    )
+            # for convenience, make augmentation matrices 3x3
+            post_tran = torch.zeros(3,dtype=torch.float64)
+            post_rot = torch.eye(3,dtype=torch.float64)
+            post_tran[:2] = post_tran2
+            post_rot[:2, :2] = post_rot2
 
-        # augmentation (resize, crop, horizontal flip, rotate)
-        resize, resize_dims, crop, flip, rotate = self.sample_augmentation(img)
-        img, post_rot2, post_tran2 = self.img_transform(img, post_rot, post_tran,
-                                                resize=resize,
-                                                resize_dims=resize_dims,
-                                                crop=crop,
-                                                flip=flip,
-                                                rotate=rotate,
-                                                )
+            intrin = torch.from_numpy(data["intrin"])
+            rot = torch.from_numpy(data["rot"])
+            tran = torch.from_numpy(data["tran"])
+
+            post_trans.append(post_tran.unsqueeze(0))
+            post_rots.append(post_rot.unsqueeze(0))
+            intrins.append(intrin.unsqueeze(0))
+            rots.append(rot.unsqueeze(0))
+            trans.append(tran.unsqueeze(0))
+            imgs.append(normalize_img(img).unsqueeze(0))
+
         image_shape = img.size[:2]  # h, w
         dataset_dict["height"] = image_shape[0]
         dataset_dict["width"] = image_shape[1]
-        dataset_dict["image"] = normalize_img(img)
-        
-        # for convenience, make augmentation matrices 3x3
-        post_tran = torch.zeros(3,dtype=torch.float64)
-        post_rot = torch.eye(3,dtype=torch.float64)
-        post_tran[:2] = post_tran2
-        post_rot[:2, :2] = post_rot2
+        dataset_dict["image"] = torch.cat(imgs,0)
 
 
         if not self.is_train:
@@ -175,8 +192,15 @@ class NuscenesDatasetMapper:
             return dataset_dict
 
         instances = Instances(image_shape)
+
+        instances.post_tran = torch.cat(post_trans,0).unsqueeze(0)
+        instances.post_rot = torch.cat(post_rots,0).unsqueeze(0)
+        instances.intrin = torch.cat(intrins,0).unsqueeze(0)
+        instances.rot = torch.cat(rots,0).unsqueeze(0)
+        instances.tran = torch.cat(trans,0).unsqueeze(0)
+
+
         
-        masks = []
         points = {}
         for segment_info in dataset_dict["annotations"]:
             class_id = segment_info["category_id"]
@@ -191,17 +215,10 @@ class NuscenesDatasetMapper:
             classes.append(k)
         classes = np.array([classes])
         instances.gt_classes = torch.tensor(classes, dtype=torch.int64)
-        instances.post_tran = post_tran.unsqueeze(0)
-        instances.post_rot = post_rot.unsqueeze(0)
-        instances.intrin = torch.from_numpy(dataset_dict["intrin"]).unsqueeze(0)
-        instances.rot = torch.from_numpy(dataset_dict["rot"]).unsqueeze(0)
-        instances.tran = torch.from_numpy(dataset_dict["tran"]).unsqueeze(0)
-
-
         masks = []
         for k,pts in points.items():
             mask = self.get_binimg(pts)
-            masks.append(mask)
+            masks.append(mask == 255)
         
         if len(masks) == 0:
             # Some image does not have annotation (all ignored)
@@ -268,12 +285,12 @@ class NuscenesDatasetMapper:
         return img, post_rot, post_tran
     
     def get_binimg(self, pts_list):
-        img = np.zeros((self.nx[0], self.nx[1]))
+        img = np.zeros((self.nx[0], self.nx[1]),dtype=np.uint8)
         for pts in pts_list:
             pts = np.round(
                 (pts - self.bx[:2] + self.dx[:2]/2.) / self.dx[:2]
                 ).astype(np.int32)
             pts[:, [1, 0]] = pts[:, [0, 1]]
-            cv2.fillPoly(img, [pts], 1.0)
+            cv2.fillPoly(img, [pts], 255)
 
         return img

@@ -51,7 +51,7 @@ categories = [
              'debris',
              'bicycle_rack']
 
-def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name = "CAM_FRONT", is_train = True, categories=None):
+def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name_list = ["CAM_FRONT"], is_train = True, categories=None):
     """
     This is a helper fuction that create dicts from nuscenes to detectron2 format.
     Nuscenes annotation use 3d bounding box, but for detectron we need 2d bounding box.
@@ -113,27 +113,29 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name = "CAM_FRONT", i
 
     dataset_dicts = []
     idx = 0
-    for i in tqdm(range(0, len(ixes))):
+    for i in tqdm(range(0, 10)):
         record = {}
         rec = ixes[i]
-        samp = nusc.get('sample_data', rec['data'][cam_name])
-        imgname = os.path.join(nusc.dataroot, samp['filename'])
-        record["file_name"] = imgname
+        camera_info = {}
+        for cam_name in cam_name_list:
+            if cam_name not in camera_info:
+                camera_info[cam_name] = {}
+            samp = nusc.get('sample_data', rec['data'][cam_name])
+            imgname = os.path.join(nusc.dataroot, samp['filename'])
+            camera_info[cam_name]["file_name"] = imgname
 
-        sens = nusc.get('calibrated_sensor', samp['calibrated_sensor_token'])
-        intrin = sens['camera_intrinsic']
-        rot = Quaternion(sens['rotation']).rotation_matrix
-        tran = sens['translation']
-        record["intrin"] = np.array(intrin,dtype=np.float64)
-        record["rot"] = np.array(rot,dtype=np.float64)
-        record["tran"] = np.array(tran,dtype=np.float64)
-
-        egopose = nusc.get('ego_pose',
-                                nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
+            sens = nusc.get('calibrated_sensor', samp['calibrated_sensor_token'])
+            intrin = sens['camera_intrinsic']
+            rot = Quaternion(sens['rotation']).rotation_matrix
+            tran = sens['translation']
+            camera_info[cam_name]["intrin"] = np.array(intrin,dtype=np.float64)
+            camera_info[cam_name]["rot"] = np.array(rot,dtype=np.float64)
+            camera_info[cam_name]["tran"] = np.array(tran,dtype=np.float64)
+        record["camera_infos"] = camera_info
+        objs = []
+        egopose = nusc.get('ego_pose',nusc.get('sample_data', rec['data']['LIDAR_TOP'])['ego_pose_token'])
         trans = -np.array(egopose['translation'])
         rot = Quaternion(egopose['rotation']).inverse
-
-        objs = []
         for tok in rec['anns']:
             inst = nusc.get('sample_annotation', tok)
             box = Box(inst['translation'], inst['size'], Quaternion(inst['rotation']))
@@ -150,19 +152,18 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name = "CAM_FRONT", i
                 "category_id": categories.index(c),
             }
             objs.append(obj)
-
         record["annotations"] = objs
-        
         dataset_dicts.append(record)
     return dataset_dicts
 
 
 def register_all_nuscenes(root):
-    train_get_dicts = lambda p=root+"/nuscenes/", c=categories: get_nuscenes_dicts(path=p, categories=c, is_train=True)
+    cams = ['CAM_FRONT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT', 'CAM_FRONT_LEFT']
+    train_get_dicts = lambda p=root+"/nuscenes/", c=categories: get_nuscenes_dicts(path=p, cam_name_list=cams, categories=c, is_train=True)
     DatasetCatalog.register("nusc_mini_train", train_get_dicts)
     MetadataCatalog.get("nusc_mini_train").thing_classes = categories
 
-    val_get_dicts = lambda p=root+"/nuscenes/", c=categories: get_nuscenes_dicts(path=p, categories=c, is_train=False)
+    val_get_dicts = lambda p=root+"/nuscenes/", c=categories: get_nuscenes_dicts(path=p, cam_name_list=cams, categories=c, is_train=False)
     DatasetCatalog.register("nusc_mini_val", train_get_dicts)
     MetadataCatalog.get("nusc_mini_val").thing_classes = categories
 

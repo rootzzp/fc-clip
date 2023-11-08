@@ -318,6 +318,7 @@ if __name__ == "__main__":
         "--num-gpus", "1",
         "SOLVER.IMS_PER_BATCH", "1",
         "INPUT.DATASET_MAPPER_NAME", "nuscenes",
+        "SOLVER.BASE_LR", "0.001",
     ]
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
