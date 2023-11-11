@@ -246,7 +246,7 @@ class FCCLIP(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
-        losses = ["labels", "masks"]
+        losses = ["masks"]
 
         criterion = SetCriterion(
             sem_seg_head.num_classes,

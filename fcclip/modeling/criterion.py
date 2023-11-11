@@ -186,7 +186,7 @@ class SetCriterion(nn.Module):
 
         losses = {
             "loss_mask": sigmoid_ce_loss_jit(point_logits, point_labels, num_masks),
-            "loss_dice": dice_loss_jit(point_logits, point_labels, num_masks),
+            # "loss_dice": dice_loss_jit(point_logits, point_labels, num_masks),
         }
 
         del src_masks
@@ -207,7 +207,7 @@ class SetCriterion(nn.Module):
 
     def get_loss(self, loss, outputs, targets, indices, num_masks):
         loss_map = {
-            'labels': self.loss_labels,
+            # 'labels': self.loss_labels,
             'masks': self.loss_masks,
         }
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
@@ -240,13 +240,13 @@ class SetCriterion(nn.Module):
             losses.update(self.get_loss(loss, outputs, targets, indices, num_masks))
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
-        if "aux_outputs" in outputs:
-            for i, aux_outputs in enumerate(outputs["aux_outputs"]):
-                indices = self.matcher(aux_outputs, targets)
-                for loss in self.losses:
-                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_masks)
-                    l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
-                    losses.update(l_dict)
+        # if "aux_outputs" in outputs:
+        #     for i, aux_outputs in enumerate(outputs["aux_outputs"]):
+        #         indices = self.matcher(aux_outputs, targets)
+        #         for loss in self.losses:
+        #             l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_masks)
+        #             l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
+        #             losses.update(l_dict)
 
         return losses
 

@@ -409,6 +409,7 @@ class MSDeformAttnPixelDecoder(nn.Module):
                 # Following FPN implementation, we use nearest upsampling here
                 y = cur_fpn + F.interpolate(out[-1], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False)
                 y = output_conv(y)
+                y = self.mask_features(y)
                 out.append(y)
 
             for i,o in enumerate(out):
@@ -463,7 +464,8 @@ class MSDeformAttnPixelDecoder(nn.Module):
                 new_x = new_x.view(B, N, self.C, self.D, imH, imW)
                 new_x = new_x.permute(0, 1, 3, 4, 5, 2)
                 o_out = self.voxel_pooling(geom, new_x) # [bs,64,200,200]
-                multi_scale_features.append(o_out)
+                if num_cur_levels == 2:
+                    multi_scale_features.append(o_out)
                 num_cur_levels += 1
 
         return bev_mask_features, multi_scale_features

@@ -106,8 +106,8 @@ class HungarianMatcher(nn.Module):
         # Iterate through batch size
         for b in range(bs):
 
-            out_prob = outputs["pred_logits"][b].softmax(-1)  # [num_queries, num_classes]
-            tgt_ids = targets[b]["labels"]
+            out_prob = outputs["pred_logits"][b].softmax(-1)  # [bs, num_queries, num_classes]
+            tgt_ids = targets[b]["labels"] # [n]
 
             # Compute the classification cost. Contrary to the loss, we don't use the NLL,
             # but approximate it in 1 - proba[target class].
@@ -116,12 +116,12 @@ class HungarianMatcher(nn.Module):
 
             out_mask = outputs["pred_masks"][b]  # [num_queries, H_pred, W_pred]
             # gt masks are already padded when preparing target
-            tgt_mask = targets[b]["masks"].to(out_mask)
+            tgt_mask = targets[b]["masks"].to(out_mask) # [n, 200, 200]
 
-            out_mask = out_mask[:, None]
-            tgt_mask = tgt_mask[:, None]
+            out_mask = out_mask[:, None] # [num_queries, 1, H_pred, W_pred]
+            tgt_mask = tgt_mask[:, None] # [n, 1, 200, 200]
             # all masks share the same set of points for efficient matching!
-            point_coords = torch.rand(1, self.num_points, 2, device=out_mask.device)
+            point_coords = torch.rand(1, self.num_points, 2, device=out_mask.device) # [1, num_points, 2]
             # get gt labels
             tgt_mask = point_sample(
                 tgt_mask,
@@ -136,8 +136,8 @@ class HungarianMatcher(nn.Module):
             ).squeeze(1)
 
             with autocast(enabled=False):
-                out_mask = out_mask.float()
-                tgt_mask = tgt_mask.float()
+                out_mask = out_mask.float() # [num_queries, num_points]
+                tgt_mask = tgt_mask.float() # [n, num_points]
                 # Compute the focal loss between masks
                 cost_mask = batch_sigmoid_ce_loss_jit(out_mask, tgt_mask)
 

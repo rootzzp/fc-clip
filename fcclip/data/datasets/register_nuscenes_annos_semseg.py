@@ -113,7 +113,7 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name_list = ["CAM_FRO
 
     dataset_dicts = []
     idx = 0
-    for i in tqdm(range(0, 10)):
+    for i in tqdm(range(0, 2)):
         record = {}
         rec = ixes[i]
         camera_info = {}
@@ -158,7 +158,7 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name_list = ["CAM_FRO
 
 
 def register_all_nuscenes(root):
-    cams = ['CAM_FRONT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT', 'CAM_FRONT_LEFT']
+    cams = ['CAM_FRONT_LEFT','CAM_FRONT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
     train_get_dicts = lambda p=root+"/nuscenes/", c=categories: get_nuscenes_dicts(path=p, cam_name_list=cams, categories=c, is_train=True)
     DatasetCatalog.register("nusc_mini_train", train_get_dicts)
     MetadataCatalog.get("nusc_mini_train").thing_classes = categories

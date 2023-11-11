@@ -20,6 +20,8 @@ from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 from ..transformer_decoder.fcclip_transformer_decoder import build_transformer_decoder
 from ..pixel_decoder.msdeformattn import build_pixel_decoder
 
+import numpy as np
+import cv2
 
 @SEM_SEG_HEADS_REGISTRY.register()
 class FCCLIPHead(nn.Module):
@@ -96,5 +98,12 @@ class FCCLIPHead(nn.Module):
 
         predictions = self.predictor(multi_scale_features, mask_features, mask,
                                     text_classifier=features[0]["text_classifier"], num_templates=features[0]["num_templates"])
+        
+        masks = predictions["pred_masks"]
+        masks = masks[0].detach().to('cpu').numpy()
+        for j in range(50):
+            mask = masks[j]
+            show_mask = mask.astype(np.uint8)
+            cv2.imwrite("./mask/camera_"+str(j)+".jpg",show_mask)
         
         return predictions

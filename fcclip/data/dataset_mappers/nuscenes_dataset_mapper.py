@@ -32,8 +32,6 @@ def get_rot(h):
 
 normalize_img = torchvision.transforms.Compose((
                 torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225]),
 ))
 
 
@@ -113,10 +111,10 @@ class NuscenesDatasetMapper:
         self.is_train = is_train
         self.data_aug_conf = {}
         self.data_aug_conf["final_dim"] = [256,256]
-        self.data_aug_conf['resize_lim'] = (0.193, 0.225)
-        self.data_aug_conf["bot_pct_lim"]=(0.0, 0.22)
-        self.data_aug_conf["rot_lim"]=(-5.4, 5.4)
-        self.data_aug_conf["rand_flip"]=True,
+        self.data_aug_conf['resize_lim'] = (1, 1.001)
+        self.data_aug_conf["bot_pct_lim"]=(0.0, 0.001)
+        self.data_aug_conf["rot_lim"]=(-0.004, 0.04)
+        self.data_aug_conf["rand_flip"]=False,
     
         self.nx = np.array([200,    200,    1])
         self.bx = np.array([-49.75, -49.75, 0])
@@ -178,9 +176,11 @@ class NuscenesDatasetMapper:
             intrins.append(intrin.unsqueeze(0))
             rots.append(rot.unsqueeze(0))
             trans.append(tran.unsqueeze(0))
-            imgs.append(normalize_img(img).unsqueeze(0))
+            image_shape = img.size[:2]  # h, w
+            img = torch.as_tensor(np.ascontiguousarray(np.asarray(img).transpose(2, 0, 1)))
+            imgs.append(img.unsqueeze(0))
 
-        image_shape = img.size[:2]  # h, w
+        
         dataset_dict["height"] = image_shape[0]
         dataset_dict["width"] = image_shape[1]
         dataset_dict["image"] = torch.cat(imgs,0)

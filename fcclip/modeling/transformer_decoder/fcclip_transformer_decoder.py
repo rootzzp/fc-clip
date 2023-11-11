@@ -364,7 +364,7 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
 
         # level embedding (we always use 3 scales)
-        self.num_feature_levels = 3
+        self.num_feature_levels = 1
         self.level_embed = nn.Embedding(self.num_feature_levels, hidden_dim)
         self.input_proj = nn.ModuleList()
         for _ in range(self.num_feature_levels):
