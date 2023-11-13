@@ -4,3 +4,4 @@ fcclip/modeling/pixel_decoder/ops/
 .vscode/
 mask/
 mask_bak/
+src_mask/

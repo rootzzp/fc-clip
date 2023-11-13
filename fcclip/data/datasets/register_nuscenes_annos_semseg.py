@@ -51,6 +51,45 @@ categories = [
              'debris',
              'bicycle_rack']
 
+def get_metadata():
+    meta = {}
+    # The following metadata maps contiguous id from [0, #thing categories +
+    # #stuff categories) to their names and colors. We have to replica of the
+    # same name and color under "thing_*" and "stuff_*" because the current
+    # visualization function in D2 handles thing and class classes differently
+    # due to some heuristic used in Panoptic FPN. We keep the same naming to
+    # enable reusing existing visualization functions.
+    thing_classes = categories
+    stuff_classes = categories
+
+    meta["thing_classes"] = thing_classes
+    meta["stuff_classes"] = stuff_classes
+
+    # Convert category id for training:
+    #   category id: like semantic segmentation, it is the class id for each
+    #   pixel. Since there are some classes not used in evaluation, the category
+    #   id is not always contiguous and thus we have two set of category ids:
+    #       - original category id: category id in the original dataset, mainly
+    #           used for evaluation.
+    #       - contiguous category id: [0, #classes), in order to train the linear
+    #           softmax classifier.
+    thing_dataset_id_to_contiguous_id = {}
+    stuff_dataset_id_to_contiguous_id = {}
+    contiguous_id_to_class_name = []
+
+    for i, cat in enumerate(categories):
+
+        thing_dataset_id_to_contiguous_id[i] = i
+        stuff_dataset_id_to_contiguous_id[i] = i
+
+        contiguous_id_to_class_name.append(cat) 
+
+    meta["thing_dataset_id_to_contiguous_id"] = thing_dataset_id_to_contiguous_id
+    meta["stuff_dataset_id_to_contiguous_id"] = stuff_dataset_id_to_contiguous_id
+    meta["contiguous_id_to_class_name"] = contiguous_id_to_class_name
+
+    return meta
+
 def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name_list = ["CAM_FRONT"], is_train = True, categories=None):
     """
     This is a helper fuction that create dicts from nuscenes to detectron2 format.
@@ -113,7 +152,7 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name_list = ["CAM_FRO
 
     dataset_dicts = []
     idx = 0
-    for i in tqdm(range(0, 2)):
+    for i in tqdm(range(0, 1)):
         record = {}
         rec = ixes[i]
         camera_info = {}
@@ -158,7 +197,7 @@ def get_nuscenes_dicts(path="./", version='v1.0-mini', cam_name_list = ["CAM_FRO
 
 
 def register_all_nuscenes(root):
-    cams = ['CAM_FRONT_LEFT','CAM_FRONT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
+    cams = ['CAM_FRONT_LEFT','CAM_FRONT', 'CAM_FRONT_RIGHT','CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
     train_get_dicts = lambda p=root+"/nuscenes/", c=categories: get_nuscenes_dicts(path=p, cam_name_list=cams, categories=c, is_train=True)
     DatasetCatalog.register("nusc_mini_train", train_get_dicts)
     MetadataCatalog.get("nusc_mini_train").thing_classes = categories
@@ -166,6 +205,8 @@ def register_all_nuscenes(root):
     val_get_dicts = lambda p=root+"/nuscenes/", c=categories: get_nuscenes_dicts(path=p, cam_name_list=cams, categories=c, is_train=False)
     DatasetCatalog.register("nusc_mini_val", train_get_dicts)
     MetadataCatalog.get("nusc_mini_val").thing_classes = categories
+    metadata = get_metadata()
+    MetadataCatalog.get("nusc_mini_val").set(evaluator_type = "coco_panoptic_seg",**metadata)
 
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")

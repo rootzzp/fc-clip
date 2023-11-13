@@ -25,6 +25,16 @@ from .ops.modules import MSDeformAttn
 import copy
 from fcclip.utils.misc import QuickCumsum
 
+def cumsum_trick(x, geom_feats, ranks):
+    x = x.cumsum(0)
+    kept = torch.ones(x.shape[0], device=x.device, dtype=torch.bool)
+    kept[:-1] = (ranks[1:] != ranks[:-1])
+
+    x, geom_feats = x[kept], geom_feats[kept]
+    x = torch.cat((x[:1], x[1:] - x[:-1]))
+
+    return x, geom_feats
+
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
@@ -332,22 +342,45 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.downsample = [4,8,16,32]
         self.frustums = self.create_frustum()
 
-        self.nx = np.array([200,    200,    1])
-        self.bx = np.array([-49.75, -49.75, 0])
-        self.dx = np.array([0.5,    0.5,    20])
+        nx = np.array([200,    200,    1])
+        bx = np.array([-49.75, -49.75, 0])
+        dx = np.array([0.5,    0.5,    20])
 
-        self.bx = torch.from_numpy(self.bx)
-        self.dx = torch.from_numpy(self.dx)
-        self.nx = torch.from_numpy(self.nx)
+        bx = torch.from_numpy(bx)
+        dx = torch.from_numpy(dx)
+        nx = torch.from_numpy(nx)
+
+        self.dx = nn.Parameter(dx, requires_grad=False)
+        self.bx = nn.Parameter(bx, requires_grad=False)
+        self.nx = nn.Parameter(nx, requires_grad=False)
+
 
         self.D = 41
         self.C = 64
-        self.depthnet = nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)
+        self.depthnet = nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0))
 
         self.depthnets = nn.ModuleList([
-            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0),
-            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0),
-            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0),
+            nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)),
+
+            nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)),
+
+            nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, self.D + self.C, kernel_size=1, padding=0)),
         ])
 
     @classmethod
@@ -567,7 +600,8 @@ class MSDeformAttnPixelDecoder(nn.Module):
         x, geom_feats, ranks = x[sorts], geom_feats[sorts], ranks[sorts]
 
         # cumsum trick
-        x, geom_feats = QuickCumsum.apply(x, geom_feats, ranks)# x:在不同voxel里面的特征值（累加后的）,geom_feats:这些不同voxel的坐标
+        # x, geom_feats = QuickCumsum.apply(x, geom_feats, ranks)# x:在不同voxel里面的特征值（累加后的）,geom_feats:这些不同voxel的坐标
+        x, geom_feats = cumsum_trick(x, geom_feats, ranks)
 
         # griddify (B x C x Z x X x Y)
         final = torch.zeros((B, C, self.nx[2], self.nx[0], self.nx[1]), device=x.device)#[1,64,1,200,200]

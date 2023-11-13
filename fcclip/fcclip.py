@@ -326,7 +326,7 @@ class FCCLIP(nn.Module):
         # res4: [1,768,64,64] 1/16
         # res4: [1,1536,32,32] 1/32
         features_list = []
-        image_list = torch.chunk(images.tensor,5,dim=1)
+        image_list = torch.chunk(images.tensor,6,dim=1)
         for t in image_list:
             features = self.backbone(t.squeeze(1))
             features_list.append(features)

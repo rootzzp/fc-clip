@@ -318,6 +318,7 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
         dec_layers = 3
         # positional encoding
         N_steps = hidden_dim // 2
+        enforce_input_project = True
         self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
         
         # define Transformer decoder here
